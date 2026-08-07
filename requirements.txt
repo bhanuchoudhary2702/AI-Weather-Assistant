@@ -1,0 +1,10 @@
+# AI Weather Assistant - Python dependencies
+# Install with:  pip install -r requirements.txt
+
+# Note: tkinter ships with the standard Python installer and cannot be
+# installed with pip. On Debian/Ubuntu run: sudo apt install python3-tk
+
+requests>=2.31.0
+pillow>=10.0.0
+python-dotenv>=1.0.0
+google-generativeai>=0.7.0

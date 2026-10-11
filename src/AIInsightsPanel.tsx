@@ -5,40 +5,53 @@ import { Icon } from "./Icon";
 interface Props {
   insights: AIInsights | null;
   isLoading: boolean;
+  hasError: boolean;
 }
 
-export function AIInsightsPanel({ insights, isLoading }: Props) {
+export function AIInsightsPanel({ insights, isLoading, hasError }: Props) {
+  let badge: { label: string; cls: string } | null = null;
+  if (insights) {
+    badge = insights.offline
+      ? { label: "Fallback Mode", cls: "ai-badge offline" }
+      : { label: "Gemini AI", cls: "ai-badge" };
+  } else if (hasError) {
+    badge = { label: "Unavailable", cls: "ai-badge error" };
+  }
+
   return (
-    <section className="glass-card ai-panel fade-in fade-in-delayed-2">
+    <section className="glass-card ai-panel fade-in delay-2" aria-label="AI weather insights">
       <div className="ai-header">
-        <span className="ai-title">
-          <Icon name="sparkles" size={18} className="ai-sparkle" />
+        <h2 className="ai-title">
+          <Icon name="sparkles" size={18} className="ai-sparkle" aria-hidden="true" />
           AI Insights
-        </span>
-        {insights && (
-          <span className={`ai-badge ${insights.offline ? "offline" : ""}`}>
-            {insights.offline ? "Fallback Mode" : "Gemini"}
-          </span>
-        )}
+        </h2>
+        {badge && <span className={badge.cls}>{badge.label}</span>}
       </div>
 
       <div className="ai-cards">
         {INSIGHT_SECTIONS.map((section, i) => {
           const text = insights?.[section.key] ?? null;
+          const placeholder = isLoading
+            ? "Analysing with Gemini…"
+            : hasError
+            ? "AI insights could not be loaded."
+            : "Search a city to see AI guidance here.";
+
           return (
-            <div
+            <article
               key={section.key}
               className="ai-card"
-              style={{ animationDelay: `${0.05 * i}s` }}
+              style={{ animationDelay: `${0.06 * i}s` }}
+              aria-labelledby={`insight-title-${section.key}`}
             >
-              <span className="ai-card-title">
-                <Icon name={section.icon} size={14} />
+              <div id={`insight-title-${section.key}`} className="ai-card-title">
+                <Icon name={section.icon} size={13} aria-hidden="true" />
                 {section.title}
-              </span>
-              <span className={`ai-card-text ${!text ? "muted" : ""}`}>
-                {text || (isLoading ? "Analysing…" : "Search a city to see AI guidance here.")}
-              </span>
-            </div>
+              </div>
+              <p className={`ai-card-text${!text ? " muted" : ""}`}>
+                {text ?? placeholder}
+              </p>
+            </article>
           );
         })}
       </div>

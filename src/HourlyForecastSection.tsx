@@ -10,14 +10,21 @@ export function HourlyForecastSection({ hourly, isDemo }: Props) {
   if (hourly.length === 0) return null;
 
   return (
-    <section className="glass-card hourly-section fade-in fade-in-delayed-1">
-      <span className="hourly-title">Next 8 Hours</span>
-      <div className="hourly-row">
+    <section className="glass-card hourly-section fade-in delay-1" aria-label="Hourly forecast">
+      <span className="section-title">Next 8 Hours</span>
+      <div className="hourly-row" role="list">
         {hourly.map((h, i) => (
-          <div key={i} className={`hourly-card ${i === 0 ? "now" : ""}`}>
+          <div
+            key={i}
+            className={`hourly-card${i === 0 ? " now" : ""}`}
+            role="listitem"
+            aria-label={`${h.time}: ${Math.round(h.temperature)}° ${h.condition}`}
+          >
             <span className="hourly-time">{h.time}</span>
             {isDemo ? (
-              <span className="hourly-icon-emoji">{getWeatherIconEmoji(h.icon)}</span>
+              <span className="hourly-icon-emoji" role="img" aria-label={h.condition}>
+                {getWeatherIconEmoji(h.icon)}
+              </span>
             ) : (
               <img
                 className="hourly-icon"
@@ -25,9 +32,10 @@ export function HourlyForecastSection({ hourly, isDemo }: Props) {
                 alt={h.condition}
                 loading="lazy"
                 onError={(e) => {
-                  const target = e.currentTarget;
-                  target.style.display = "none";
-                  target.parentElement!.textContent = getWeatherIconEmoji(h.icon);
+                  const img = e.currentTarget;
+                  img.style.display = "none";
+                  const parent = img.parentElement;
+                  if (parent) parent.textContent = getWeatherIconEmoji(h.icon);
                 }}
               />
             )}

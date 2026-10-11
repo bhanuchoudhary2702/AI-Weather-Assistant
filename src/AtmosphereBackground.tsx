@@ -3,23 +3,21 @@ import type { WeatherCondition, TimeOfDay } from "./types";
 import { getWeatherTheme } from "./weatherUtils";
 
 interface Cloud {
-  x: number;
-  y: number;
-  scale: number;
-  speed: number;
-  opacity: number;
-  blur: number;
+  x: number; y: number;
+  scale: number; speed: number;
+  opacity: number; blur: number;
 }
 
 interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  opacity: number;
-  life: number;
-  maxLife: number;
+  x: number; y: number;
+  vx: number; vy: number;
+  size: number; opacity: number;
+  life: number; maxLife: number;
+}
+
+interface Star {
+  x: number; y: number;
+  r: number; twinklePhase: number; twinkleSpeed: number;
 }
 
 interface Props {
@@ -27,235 +25,246 @@ interface Props {
   timeOfDay: TimeOfDay;
 }
 
-export function AtmosphereBackground({ condition, timeOfDay }: Props) {
-  const cloudCanvasRef = useRef<HTMLCanvasElement>(null);
-  const particleCanvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number>(0);
-  const themeRef = useRef(getWeatherTheme(condition, timeOfDay));
+function setupCanvas(canvas: HTMLCanvasElement, w: number, h: number) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  const ctx = canvas.getContext("2d");
+  if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
 
-  // Update theme ref when condition/time changes
+export function AtmosphereBackground({ condition, timeOfDay }: Props) {
+  const cloudCanvasRef   = useRef<HTMLCanvasElement>(null);
+  const particleCanvasRef = useRef<HTMLCanvasElement>(null);
+  const animRef   = useRef<number>(0);
+  const condRef   = useRef(condition);
+  const timeRef   = useRef(timeOfDay);
+
   useEffect(() => {
-    themeRef.current = getWeatherTheme(condition, timeOfDay);
+    condRef.current = condition;
+    timeRef.current = timeOfDay;
   }, [condition, timeOfDay]);
 
-  // Cloud + particle animation
   useEffect(() => {
-    const cloudCanvas = cloudCanvasRef.current;
+    const cloudCanvas    = cloudCanvasRef.current;
     const particleCanvas = particleCanvasRef.current;
     if (!cloudCanvas || !particleCanvas) return;
-
-    const cloudCtx = cloudCanvas.getContext("2d");
+    const cloudCtx    = cloudCanvas.getContext("2d");
     const particleCtx = particleCanvas.getContext("2d");
     if (!cloudCtx || !particleCtx) return;
 
-    let width = window.innerWidth;
-    let height = window.innerHeight;
+    let W = window.innerWidth;
+    let H = window.innerHeight;
+    let raf = 0;
 
-    const setupCanvas = (canvas: HTMLCanvasElement) => {
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      canvas.style.width = width + "px";
-      canvas.style.height = height + "px";
-      const ctx = canvas.getContext("2d");
-      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
+    setupCanvas(cloudCanvas,    W, H);
+    setupCanvas(particleCanvas, W, H);
 
-    setupCanvas(cloudCanvas);
-    setupCanvas(particleCanvas);
+    // ── Clouds ────────────────────────────────────────
+    const makeCloud = (randomX = true): Cloud => ({
+      x: randomX ? Math.random() * W : -200,
+      y: Math.random() * H * 0.55,
+      scale: 0.7 + Math.random() * 1.6,
+      speed: 0.07 + Math.random() * 0.22,
+      opacity: 0.15 + Math.random() * 0.28,
+      blur: 22 + Math.random() * 32,
+    });
 
-    // Initialize clouds
-    const numClouds = condition === "clear" ? 3 : condition === "clouds" ? 7 : 5;
-    const clouds: Cloud[] = [];
-    for (let i = 0; i < numClouds; i++) {
-      clouds.push({
-        x: Math.random() * width,
-        y: Math.random() * height * 0.6,
-        scale: 0.8 + Math.random() * 1.5,
-        speed: 0.08 + Math.random() * 0.25,
-        opacity: 0.15 + Math.random() * 0.3,
-        blur: 20 + Math.random() * 30,
-      });
-    }
+    const clouds: Cloud[] = Array.from({ length: 7 }, () => makeCloud(true));
 
-    // Initialize particles based on condition
-    const isRaining = condition === "rain" || condition === "drizzle";
-    const isSnowing = condition === "snow";
-    const isThunder = condition === "thunderstorm";
-    const numParticles = isRaining ? 80 : isSnowing ? 50 : isThunder ? 60 : 0;
-
-    const particles: Particle[] = [];
-    const createParticle = (): Particle => {
-      if (isRaining || isThunder) {
-        return {
-          x: Math.random() * width,
-          y: -20,
-          vx: -1 + Math.random() * 0.5,
-          vy: 6 + Math.random() * 8,
-          size: 1 + Math.random() * 2,
-          opacity: 0.3 + Math.random() * 0.4,
-          life: 0,
-          maxLife: height + 40,
-        };
-      }
-      return {
-        x: Math.random() * width,
-        y: Math.random() * height,
-        vx: -0.5 + Math.random() * 1,
-        vy: 0.3 + Math.random() * 1.2,
-        size: 1.5 + Math.random() * 3,
-        opacity: 0.4 + Math.random() * 0.5,
-        life: 0,
-        maxLife: 300 + Math.random() * 200,
-      };
-    };
-
-    for (let i = 0; i < numParticles; i++) {
-      const p = createParticle();
-      p.y = Math.random() * height;
-      particles.push(p);
-    }
-
-    let lightningTimer = 0;
-    let lightningFlash = 0;
-
-    const drawCloud = (ctx: CanvasRenderingContext2D, cloud: Cloud, color: string, opacity: number) => {
-      const { x, y, scale, blur } = cloud;
+    const drawCloud = (ctx: CanvasRenderingContext2D, c: Cloud, color: string, opacity: number) => {
+      const r = 60 * c.scale;
       ctx.save();
-      ctx.filter = `blur(${blur}px)`;
-      ctx.globalAlpha = opacity;
+      ctx.filter = `blur(${c.blur}px)`;
+      ctx.globalAlpha = Math.min(1, opacity);
       ctx.fillStyle = color;
-
-      const r = 60 * scale;
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.arc(x + r * 0.8, y - r * 0.2, r * 0.7, 0, Math.PI * 2);
-      ctx.arc(x + r * 1.5, y, r * 0.8, 0, Math.PI * 2);
-      ctx.arc(x + r * 0.4, y + r * 0.3, r * 0.6, 0, Math.PI * 2);
-      ctx.arc(x - r * 0.5, y + r * 0.1, r * 0.65, 0, Math.PI * 2);
+      ctx.arc(c.x,            c.y,           r,        0, Math.PI * 2);
+      ctx.arc(c.x + r * .8,  c.y - r * .2,  r * .72,  0, Math.PI * 2);
+      ctx.arc(c.x + r * 1.5, c.y,           r * .82,  0, Math.PI * 2);
+      ctx.arc(c.x + r * .4,  c.y + r * .3,  r * .6,   0, Math.PI * 2);
+      ctx.arc(c.x - r * .5,  c.y + r * .1,  r * .65,  0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     };
 
-    const animate = () => {
-      const theme = themeRef.current;
+    // ── Stars (clear-night only) ───────────────────────
+    const stars: Star[] = Array.from({ length: 160 }, () => ({
+      x: Math.random() * W,
+      y: Math.random() * H * 0.7,
+      r: 0.4 + Math.random() * 1.2,
+      twinklePhase: Math.random() * Math.PI * 2,
+      twinkleSpeed: 0.008 + Math.random() * 0.018,
+    }));
 
-      // Clouds
-      cloudCtx.clearRect(0, 0, width, height);
-      for (const cloud of clouds) {
-        cloud.x += cloud.speed;
-        if (cloud.x - 200 * cloud.scale > width) {
-          cloud.x = -200 * cloud.scale;
-          cloud.y = Math.random() * height * 0.6;
+    // ── Particles ─────────────────────────────────────
+    const makeParticle = (spawnTop: boolean): Particle => ({
+      x: Math.random() * W,
+      y: spawnTop ? -20 : Math.random() * H,
+      vx: -0.8 + Math.random() * 0.4,
+      vy: 5 + Math.random() * 9,
+      size: 1 + Math.random() * 2,
+      opacity: 0.25 + Math.random() * 0.45,
+      life: 0,
+      maxLife: H + 40,
+    });
+
+    const makeSnowParticle = (spawnTop: boolean): Particle => ({
+      x: Math.random() * W,
+      y: spawnTop ? -10 : Math.random() * H,
+      vx: -0.4 + Math.random() * 0.8,
+      vy: 0.6 + Math.random() * 1.6,
+      size: 1.5 + Math.random() * 3.5,
+      opacity: 0.45 + Math.random() * 0.5,
+      life: 0,
+      maxLife: H + 20,
+    });
+
+    const isRaining  = ["rain", "drizzle", "thunderstorm"].includes(condition);
+    const isSnowing  = condition === "snow";
+    const isThunder  = condition === "thunderstorm";
+    const numP       = isRaining ? 90 : isSnowing ? 55 : 0;
+
+    const particles: Particle[] = isSnowing
+      ? Array.from({ length: numP }, () => makeSnowParticle(false))
+      : Array.from({ length: numP }, () => makeParticle(false));
+
+    let lightningTimer = 0;
+    let flashOpacity   = 0;
+    let frameCount     = 0;
+
+    const animate = () => {
+      const cond = condRef.current;
+      const tod  = timeRef.current;
+      const theme = getWeatherTheme(cond, tod);
+      const isNight = tod === "night";
+      const isClearNight = cond === "clear" && isNight;
+      frameCount++;
+
+      // ── Cloud canvas ─────────────────────────────────
+      cloudCtx.clearRect(0, 0, W, H);
+
+      // Stars (only when clear-night)
+      if (isClearNight) {
+        for (const s of stars) {
+          s.twinklePhase += s.twinkleSpeed;
+          const alpha = 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(s.twinklePhase));
+          cloudCtx.save();
+          cloudCtx.globalAlpha = alpha;
+          cloudCtx.fillStyle   = "#b0c8ff";
+          cloudCtx.beginPath();
+          cloudCtx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+          cloudCtx.fill();
+          cloudCtx.restore();
         }
-        drawCloud(cloudCtx, cloud, theme.cloudColor, cloud.opacity * theme.cloudOpacity);
       }
 
-      // Particles
-      particleCtx.clearRect(0, 0, width, height);
-      if (isRaining || isSnowing || isThunder) {
-        for (let i = particles.length - 1; i >= 0; i--) {
-          const p = particles[i];
-          p.x += p.vx;
-          p.y += p.vy;
-          p.life++;
+      // Cloud count driven by condition
+      const targetClouds = cond === "clear" ? 2 : cond === "clouds" ? 7 : 5;
+      for (let i = 0; i < Math.min(clouds.length, targetClouds); i++) {
+        const c = clouds[i];
+        c.x += c.speed;
+        if (c.x - 200 * c.scale > W) {
+          c.x = -200 * c.scale;
+          c.y = Math.random() * H * 0.55;
+        }
+        drawCloud(cloudCtx, c, theme.cloudColor, c.opacity * theme.cloudOpacity);
+      }
 
-          if (p.y > height + 20 || p.life > p.maxLife) {
-            particles[i] = createParticle();
+      // ── Particle canvas ───────────────────────────────
+      particleCtx.clearRect(0, 0, W, H);
+
+      if (isRaining || isSnowing) {
+        const isRain = isRaining;
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          p.x += p.vx; p.y += p.vy; p.life++;
+          if (p.y > H + 20 || p.life > p.maxLife) {
+            particles[i] = isSnowing ? makeSnowParticle(true) : makeParticle(true);
             continue;
           }
-
           particleCtx.save();
           particleCtx.globalAlpha = p.opacity;
-          particleCtx.fillStyle = theme.particleColor;
-
-          if (isSnowing) {
-            particleCtx.beginPath();
-            particleCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            particleCtx.fill();
-          } else {
+          if (isRain) {
             particleCtx.strokeStyle = theme.particleColor;
-            particleCtx.lineWidth = p.size;
+            particleCtx.lineWidth   = p.size;
             particleCtx.beginPath();
             particleCtx.moveTo(p.x, p.y);
             particleCtx.lineTo(p.x - p.vx * 2, p.y - p.vy * 2);
             particleCtx.stroke();
+          } else {
+            particleCtx.fillStyle = theme.particleColor;
+            particleCtx.beginPath();
+            particleCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            particleCtx.fill();
           }
           particleCtx.restore();
         }
       }
 
-      // Lightning flash for thunderstorms
+      // Lightning flashes
       if (isThunder) {
         lightningTimer++;
-        if (lightningTimer > 120 + Math.random() * 200) {
-          lightningFlash = 12;
+        if (lightningTimer > 130 + Math.random() * 180) {
+          flashOpacity   = 0.28;
           lightningTimer = 0;
         }
-        if (lightningFlash > 0) {
+        if (flashOpacity > 0) {
           particleCtx.save();
-          particleCtx.fillStyle = `rgba(200, 180, 255, ${lightningFlash / 24})`;
-          particleCtx.fillRect(0, 0, width, height);
+          particleCtx.fillStyle = `rgba(200,180,255,${flashOpacity})`;
+          particleCtx.fillRect(0, 0, W, H);
           particleCtx.restore();
-          lightningFlash--;
+          flashOpacity = Math.max(0, flashOpacity - 0.025);
         }
       }
 
-      animationRef.current = requestAnimationFrame(animate);
+      raf = requestAnimationFrame(animate);
     };
 
-    animate();
+    raf = requestAnimationFrame(animate);
+    animRef.current = raf;
 
-    const handleResize = () => {
-      width = window.innerWidth;
-      height = window.innerHeight;
-      setupCanvas(cloudCanvas);
-      setupCanvas(particleCanvas);
+    const onResize = () => {
+      cancelAnimationFrame(animRef.current);
+      W = window.innerWidth;
+      H = window.innerHeight;
+      setupCanvas(cloudCanvas,    W, H);
+      setupCanvas(particleCanvas, W, H);
+      animRef.current = requestAnimationFrame(animate);
     };
 
-    window.addEventListener("resize", handleResize);
+    window.addEventListener("resize", onResize, { passive: true });
     return () => {
-      cancelAnimationFrame(animationRef.current);
-      window.removeEventListener("resize", handleResize);
+      cancelAnimationFrame(animRef.current);
+      window.removeEventListener("resize", onResize);
     };
-  }, [condition, timeOfDay]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // runs once; condition/timeOfDay changes are read through refs
 
   const theme = getWeatherTheme(condition, timeOfDay);
 
   return (
     <>
-      {/* Base gradient background */}
       <div
+        aria-hidden="true"
         style={{
-          position: "fixed",
-          inset: 0,
+          position: "fixed", inset: 0,
           background: theme.gradient,
           zIndex: 0,
-          transition: "background 1.5s ease",
+          transition: "background 1.8s ease",
         }}
-        aria-hidden="true"
       />
-      {/* Cloud layer */}
       <canvas
         ref={cloudCanvasRef}
         aria-hidden="true"
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 1,
-          pointerEvents: "none",
-        }}
+        style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none" }}
       />
-      {/* Particle layer */}
       <canvas
         ref={particleCanvasRef}
         aria-hidden="true"
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 2,
-          pointerEvents: "none",
-        }}
+        style={{ position: "fixed", inset: 0, zIndex: 2, pointerEvents: "none" }}
       />
     </>
   );

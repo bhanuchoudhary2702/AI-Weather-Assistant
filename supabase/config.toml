@@ -1,3 +1,7 @@
 [functions.weather]
 verify_jwt = false
 entrypoint = "./functions/weather/index.ts"
+
+[functions.ai-insights]
+verify_jwt = false
+entrypoint = "./functions/ai-insights/index.ts"

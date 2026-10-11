@@ -10,6 +10,7 @@ import { WeatherSkeleton, HourlySkeleton, AISkeleton } from "./Skeletons";
 import { DemoBadge } from "./DemoBadge";
 import { Icon } from "./Icon";
 import { fetchWeather, WeatherApiError } from "./weatherApi";
+import { fetchInsights, AiApiError } from "./aiApi";
 import type { WeatherData, HourlyForecast, AIInsights, StatusType, WeatherCondition, TimeOfDay } from "./types";
 import { DEMO_LABEL, getConditionFromCode, getTimeOfDay } from "./mockData";
 
@@ -88,9 +89,30 @@ export function App() {
         setCurrentCity(data.weather.city);
         addToHistory(data.weather.city);
         setStatus("success");
-        setStatusMessage("Weather loaded. AI insights available in Phase 3.");
-        setIsLoadingInsights(false);
-        setIsDemo(false);
+        setStatusMessage("Weather loaded. Asking Gemini for insights…");
+
+        // Phase 3: Call Gemini AI Insights Edge Function
+        try {
+          const aiInsights = await fetchInsights(data.weather);
+          setInsights(aiInsights);
+          if (aiInsights.offline) {
+            setStatus("warning");
+            setStatusMessage("Weather loaded. Gemini unavailable — showing built-in advice.");
+          } else {
+            setStatus("success");
+            setStatusMessage("Weather and AI insights updated.");
+          }
+        } catch (err) {
+          if (err instanceof AiApiError) {
+            setStatus("warning");
+            setStatusMessage(`Weather loaded. AI unavailable — ${err.message}`);
+          } else {
+            setStatus("warning");
+            setStatusMessage("Weather loaded. AI insights could not be loaded.");
+          }
+        } finally {
+          setIsLoadingInsights(false);
+        }
       } catch (err) {
         if (err instanceof WeatherApiError) {
           setStatus("error");
@@ -185,7 +207,7 @@ export function App() {
         <footer style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontSize: "0.75rem" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Icon name="cloud" size={14} />
-            AI Weather Assistant · Live Weather + AI Insights (Phase 3 pending)
+            AI Weather Assistant · Live Weather + Gemini AI Insights
           </span>
         </footer>
       </div>

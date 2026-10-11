@@ -1,0 +1,3 @@
+[functions.weather]
+verify_jwt = false
+entrypoint = "./functions/weather/index.ts"

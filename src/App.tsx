@@ -9,16 +9,9 @@ import { EmptyState } from "./EmptyState";
 import { WeatherSkeleton, HourlySkeleton, AISkeleton } from "./Skeletons";
 import { DemoBadge } from "./DemoBadge";
 import { Icon } from "./Icon";
-import { Icon as RefreshIcon } from "./Icon";
+import { fetchWeather, WeatherApiError } from "./weatherApi";
 import type { WeatherData, HourlyForecast, AIInsights, StatusType, WeatherCondition, TimeOfDay } from "./types";
-import {
-  MOCK_WEATHER,
-  MOCK_HOURLY,
-  MOCK_INSIGHTS,
-  DEMO_LABEL,
-  getConditionFromCode,
-  getTimeOfDay,
-} from "./mockData";
+import { DEMO_LABEL, getConditionFromCode, getTimeOfDay } from "./mockData";
 
 const HISTORY_KEY = "ai-weather-history";
 const MAX_HISTORY = 8;
@@ -35,7 +28,6 @@ export function App() {
   const [isDemo, setIsDemo] = useState(false);
   const [currentCity, setCurrentCity] = useState<string | null>(null);
 
-  // Load history from localStorage on mount
   useEffect(() => {
     try {
       const stored = localStorage.getItem(HISTORY_KEY);
@@ -50,7 +42,6 @@ export function App() {
     }
   }, []);
 
-  // Save history to localStorage
   const saveHistory = useCallback((cities: string[]) => {
     try {
       localStorage.setItem(HISTORY_KEY, JSON.stringify(cities));
@@ -89,26 +80,29 @@ export function App() {
       setStatusMessage(`Fetching weather for ${city}…`);
       setInsights(null);
 
-      // Phase 1: Use mock data with a simulated network delay
-      // Phase 2 will replace this with a real Edge Function call
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      try {
+        const data = await fetchWeather(city);
 
-      setWeather(MOCK_WEATHER);
-      setHourly(MOCK_HOURLY);
-      setCurrentCity(MOCK_WEATHER.city);
-      addToHistory(MOCK_WEATHER.city);
-      setStatus("loading");
-      setStatusMessage("Weather loaded. Asking Gemini for insights…");
-
-      // Simulate AI loading delay
-      await new Promise((resolve) => setTimeout(resolve, 800));
-
-      setInsights(MOCK_INSIGHTS);
-      setIsLoadingInsights(false);
-      setIsDemo(true);
-      setStatus("warning");
-      setStatusMessage("Demo data shown — backend integration pending.");
-      setIsLoading(false);
+        setWeather(data.weather);
+        setHourly(data.hourly);
+        setCurrentCity(data.weather.city);
+        addToHistory(data.weather.city);
+        setStatus("success");
+        setStatusMessage("Weather loaded. AI insights available in Phase 3.");
+        setIsLoadingInsights(false);
+        setIsDemo(false);
+      } catch (err) {
+        if (err instanceof WeatherApiError) {
+          setStatus("error");
+          setStatusMessage(err.message);
+        } else {
+          setStatus("error");
+          setStatusMessage("An unexpected error occurred. Please try again.");
+        }
+        setIsLoadingInsights(false);
+      } finally {
+        setIsLoading(false);
+      }
     },
     [isLoading, addToHistory]
   );
@@ -123,7 +117,6 @@ export function App() {
     handleSearch("San Francisco");
   }, [handleSearch]);
 
-  // Compute atmosphere props
   const condition: WeatherCondition = weather
     ? getConditionFromCode(weather.condition)
     : "clouds";
@@ -146,7 +139,7 @@ export function App() {
               onClick={handleRefresh}
               disabled={!currentCity || isLoading}
             >
-              <RefreshIcon name="refresh" size={15} />
+              <Icon name="refresh" size={15} />
               Refresh
             </button>
           </div>
@@ -192,7 +185,7 @@ export function App() {
         <footer style={{ textAlign: "center", padding: "24px 0", color: "var(--text-dim)", fontSize: "0.75rem" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Icon name="cloud" size={14} />
-            AI Weather Assistant · Phase 1 — Cinematic UI Preview
+            AI Weather Assistant · Live Weather + AI Insights (Phase 3 pending)
           </span>
         </footer>
       </div>

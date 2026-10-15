@@ -8,6 +8,104 @@ No HTML, CSS or JavaScript is used anywhere in this project.
 
 ---
 
+## Web Edition (React + Vite + Supabase Edge Functions)
+
+The same app is also available as a browser-based web application with a
+cinematic animated weather background, 3D glass cards, and the same
+OpenWeatherMap + Gemini integration — all API keys kept server-side.
+
+The web edition lives alongside the Python files in the same project folder.
+Both editions share the same two API keys and produce the same six insight
+cards. The Python desktop app is untouched and still runs on its own.
+
+### Quick start (web edition)
+
+1. **Install Node.js 18+** (if you don't have it — check at <https://nodejs.org>)
+2. Open a terminal in the project folder
+3. Run `npm install` (first time only — downloads dependencies)
+4. Run `npm run dev` — the app opens at `http://localhost:5173`
+
+That's it for local development. The dev server reloads automatically when
+you save changes.
+
+### Where to put your API keys (web edition)
+
+API keys for the web edition are stored as **Supabase Edge Function secrets**,
+not in the `.env` file. The `.env` file is only used for the Python desktop app.
+
+To add keys for the web edition:
+
+1. Go to your Bolt project dashboard
+2. Click **Database** in the left sidebar
+3. Go to the **Secrets** tab
+4. Click "New secret" and add each key:
+
+| Secret name | Where to get it | What it unlocks |
+| --- | --- | --- |
+| `OPENWEATHER_API_KEY` | <https://openweathermap.org/api> (free tier) | Real live weather data for any city |
+| `GEMINI_API_KEY` | <https://aistudio.google.com/app/apikey> | Real Gemini AI insights (instead of fallback advice) |
+
+Optional secret: `GEMINI_MODEL` (defaults to `gemini-1.5-flash` if not set).
+
+Source: <https://support.bolt.new/cloud/database/secrets>
+
+### How to tell if real data is working
+
+| Feature | How to verify |
+| --- | --- |
+| **Real weather** | Search any city — you should see the official weather icon image (not an emoji), a real temperature, and 8 hourly forecast entries. The status bar will say "live weather and Gemini insights ready." |
+| **Real Gemini AI** | The badge in the AI Insights panel reads "Gemini AI" (not "Fallback Mode"). The insight text will have natural, conversational phrasing that varies per city and condition. |
+| **Fallback mode** | If the Gemini key is missing or invalid, the badge reads "Fallback Mode" and the status bar says "Gemini unavailable, showing built-in advice." The app still works — it shows rule-based advice (same logic as the Python `ai.py` fallback). |
+
+### Build and deploy (web edition)
+
+```bash
+# Production build (outputs to dist/)
+npm run build
+
+# Preview the production build locally
+npm run preview
+```
+
+The built files in `dist/` are static HTML/CSS/JS and can be hosted on any
+static hosting provider (Netlify, Vercel, Cloudflare Pages, etc.). Upload the
+entire `dist/` folder.
+
+The Supabase Edge Functions are deployed automatically from
+`supabase/functions/` when you use the Bolt environment.
+
+### API key security
+
+- `OPENWEATHER_API_KEY` and `GEMINI_API_KEY` are read exclusively inside the
+  Supabase Edge Functions via `Deno.env.get()` — they never appear in the
+  browser or in the built JavaScript bundle.
+- The browser only contains the Supabase project URL and anon key, which are
+  designed to be public (they allow access only through RLS-protected endpoints).
+- The Edge Functions act as a secure proxy: the browser sends a city name,
+  the function adds the API key server-side, calls the external API, and
+  returns only the formatted result.
+
+### Web edition file structure
+
+```text
+├── src/
+│   ├── App.tsx              # Main app — state, search flow, layout
+│   ├── AtmosphereBackground.tsx  # Animated canvas weather background
+│   ├── CitySearch.tsx       # Search input + history chips + clear confirm
+│   ├── WeatherPanel.tsx     # 3D tilt card with temp, metrics, range bar
+│   ├── HourlyForecastSection.tsx # Horizontal scrollable 8-hour forecast
+│   ├── AIInsightsPanel.tsx  # Six AI insight cards with stagger animation
+│   ├── ConfirmModal.tsx     # Accessible confirmation dialog
+│   ├── Skeletons.tsx        # Loading state placeholders
+│   └── ...                  # Icons, types, utilities, API clients
+├── supabase/functions/
+│   ├── weather/index.ts     # Edge Function: OpenWeatherMap proxy
+│   └── ai-insights/index.ts # Edge Function: Gemini AI proxy + fallback
+└── package.json             # Web app dependencies and scripts
+```
+
+---
+
 ## Features
 
 - Search any city in the world

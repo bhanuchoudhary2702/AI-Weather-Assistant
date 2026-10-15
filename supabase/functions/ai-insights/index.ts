@@ -24,10 +24,9 @@ const corsHeaders = {
 };
 
 const GEMINI_MODEL_DEFAULT = "gemini-1.5-flash";
-const REQUEST_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 
 const INSIGHT_KEYS = ["summary", "clothing", "travel", "health", "activity", "alert"] as const;
-type InsightKey = (typeof INSIGHT_KEYS)[number];
 
 interface WeatherInput {
   location?: string;
@@ -85,11 +84,9 @@ function buildPrompt(w: WeatherInput): string {
 function parseGeminiResponse(text: string): Partial<Insights> | null {
   if (!text) return null;
 
-  // Strip markdown code fences
   let cleaned = text.trim();
   cleaned = cleaned.replace(/^```(?:json)?\s*/gm, "").replace(/```\s*$/gm, "").trim();
 
-  // Extract the JSON object
   const match = cleaned.match(/\{[\s\S]*\}/);
   if (!match) return null;
 
@@ -110,7 +107,6 @@ function parseGeminiResponse(text: string): Partial<Insights> | null {
     }
   }
 
-  // Must have at least the summary to be considered valid
   if (!result.summary) return null;
   return result;
 }
@@ -173,6 +169,85 @@ function errorResponse(status: number, message: string): Response {
   });
 }
 
+function insightsResponse(insights: Insights, _debugStatus: string): Response {
+  return new Response(
+    JSON.stringify({ insights }),
+    {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    },
+  );
+}
+
+/**
+ * Try calling Gemini with a given model name.
+ * Returns { text, status } on success, or { text: null, status } on failure.
+ */
+async function callGemini(
+  apiKey: string,
+  modelName: string,
+  prompt: string,
+): Promise<{ text: string | null; status: string }> {
+  // Use ?key= query parameter — this is the documented auth method
+  // and is more reliable in Deno/Edge runtimes than the header approach.
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1024,
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (res.status === 429) {
+      return { text: null, status: `rate_limited(model=${modelName})` };
+    }
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      const snippet = errBody.slice(0, 200).replace(/\n/g, " ");
+      return { text: null, status: `api_error_${res.status}(model=${modelName} ${snippet})` };
+    }
+
+    const data = await res.json().catch(() => null);
+    if (!data) {
+      return { text: null, status: `bad_json(model=${modelName})` };
+    }
+
+    const candidates = data.candidates ?? [];
+    if (candidates.length === 0) {
+      const blocked = data.promptFeedback?.blockReason ?? "no_candidates";
+      return { text: null, status: `no_candidates(model=${modelName} reason=${blocked})` };
+    }
+
+    const parts = candidates[0]?.content?.parts ?? [];
+    const text = parts.map((p: { text?: string }) => p.text ?? "").join("").trim();
+
+    if (!text) {
+      return { text: null, status: `empty_text(model=${modelName})` };
+    }
+
+    return { text, status: `ok(model=${modelName})` };
+  } catch (err) {
+    clearTimeout(timeoutId);
+    const msg = err instanceof Error ? err.message : "unknown";
+    return { text: null, status: `fetch_error(model=${modelName} ${msg})` };
+  }
+}
+
+// Model fallback chain — try configured model first, then known-good alternatives
+const MODEL_FALLBACKS = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -195,108 +270,50 @@ Deno.serve(async (req: Request) => {
 
     const apiKey = Deno.env.get("GEMINI_API_KEY");
     if (!apiKey) {
-      // Graceful fallback — same as the Python app
       const insights = fallbackInsights(w);
-      return new Response(
-        JSON.stringify({ insights }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return insightsResponse(insights, "no_key");
     }
 
-    const modelName = (Deno.env.get("GEMINI_MODEL") ?? GEMINI_MODEL_DEFAULT).trim() || GEMINI_MODEL_DEFAULT;
+    const configuredModel = (Deno.env.get("GEMINI_MODEL") ?? "").trim();
     const prompt = buildPrompt(w);
 
-    // Call Gemini REST API directly (no SDK needed in Deno)
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+    // Build model try-list: configured model first (if set), then fallbacks
+    const modelsToTry = [
+      ...(configuredModel && !MODEL_FALLBACKS.includes(configuredModel) ? [configuredModel] : []),
+      ...MODEL_FALLBACKS,
+    ];
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let lastStatus = "no_attempt";
+    for (const modelName of modelsToTry) {
+      const result = await callGemini(apiKey, modelName, prompt);
+      lastStatus = result.status;
 
-    let geminiRes: Response;
-    try {
-      geminiRes = await fetch(geminiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 1024,
-          },
-        }),
-        signal: controller.signal,
-      });
-    } catch {
-      clearTimeout(timeoutId);
-      // Network failure or timeout — use fallback
-      const insights = fallbackInsights(w);
-      return new Response(
-        JSON.stringify({ insights }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    clearTimeout(timeoutId);
+      if (result.text) {
+        const parsed = parseGeminiResponse(result.text);
+        if (parsed) {
+          const fb = fallbackInsights(w);
+          const insights: Insights = {
+            summary: parsed.summary ?? fb.summary,
+            clothing: parsed.clothing ?? fb.clothing,
+            travel: parsed.travel ?? fb.travel,
+            health: parsed.health ?? fb.health,
+            activity: parsed.activity ?? fb.activity,
+            alert: parsed.alert ?? fb.alert,
+            offline: false,
+          };
+          return insightsResponse(insights, lastStatus);
+        }
+        // Parsed failed — try next model
+        lastStatus = `parse_failed(model=${modelName})`;
+      }
 
-    if (geminiRes.status === 429) {
-      // Rate limited — use fallback
-      const insights = fallbackInsights(w);
-      return new Response(
-        JSON.stringify({ insights }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      // If rate-limited, don't bother trying other models
+      if (result.status.startsWith("rate_limited")) break;
     }
 
-    if (!geminiRes.ok) {
-      // Other API errors — use fallback
-      const insights = fallbackInsights(w);
-      return new Response(
-        JSON.stringify({ insights }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const geminiData = await geminiRes.json().catch(() => null);
-    if (!geminiData) {
-      const insights = fallbackInsights(w);
-      return new Response(
-        JSON.stringify({ insights }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Extract text from the Gemini response
-    const candidates = geminiData.candidates ?? [];
-    const parts = candidates[0]?.content?.parts ?? [];
-    const text = parts.map((p: { text?: string }) => p.text ?? "").join("").trim();
-
-    const parsed = parseGeminiResponse(text);
-    if (!parsed) {
-      const insights = fallbackInsights(w);
-      return new Response(
-        JSON.stringify({ insights }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Fill any missing keys with fallback values
-    const fb = fallbackInsights(w);
-    const insights: Insights = {
-      summary: parsed.summary ?? fb.summary,
-      clothing: parsed.clothing ?? fb.clothing,
-      travel: parsed.travel ?? fb.travel,
-      health: parsed.health ?? fb.health,
-      activity: parsed.activity ?? fb.activity,
-      alert: parsed.alert ?? fb.alert,
-      offline: false,
-    };
-
-    return new Response(
-      JSON.stringify({ insights }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    // All models failed — use fallback
+    const insights = fallbackInsights(w);
+    return insightsResponse(insights, `all_models_failed(${lastStatus})`);
   } catch (err) {
     const message = err instanceof Error ? err.message : "An unexpected error occurred.";
     return errorResponse(500, message);

@@ -5,3 +5,7 @@ entrypoint = "./functions/weather/index.ts"
 [functions.ai-insights]
 verify_jwt = false
 entrypoint = "./functions/ai-insights/index.ts"
+
+[functions.test-gemini]
+verify_jwt = false
+entrypoint = "./functions/test-gemini/index.ts"

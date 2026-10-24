@@ -1,0 +1,17 @@
+{
+  "projectId": "71932448",
+  "functions": {
+    "ai-insights": {
+      "hasChanged": false,
+      "hash": "2faa5aba963b267956543e419f66246d4788457254091100ca46ab4eee46f05b"
+    },
+    "weather": {
+      "hasChanged": false,
+      "hash": "0475e1863be0fd0390998c8f288bad920fd159040bb33e918d93de672b3215be"
+    },
+    "test-gemini": {
+      "hasChanged": false,
+      "hash": "219a67c16e2faafc8ae6e872bc49e0195abdfdde67f44f7a39221cbf82587e8f"
+    }
+  }
+}
